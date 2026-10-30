@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "comment": "Zusätzliche YouTube-Werbefelder für die Video-Erweiterung von Still. Die Erweiterung hat eingebaute Standardwerte; was hier steht, kommt ohne App-Update hinzu.",
+  "youtube": {
+    "adKeys": [],
+    "adRenderers": []
+  }
+}

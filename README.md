@@ -10,6 +10,12 @@ Safari content blocker lists for the **Still** app (iPhone, iPad, Mac), built ev
    (`https://paffrathjohannes-a11y.github.io/still-filters/v1/manifest.json`). Otherwise the last good version
    stays online and an issue is opened.
 
+## Video (YouTube)
+
+`video/youtube-main.js` is a copy of the page script of Still's video extension (built from the app repository).
+The daily check loads real YouTube videos in WebKit with and without it: with the script, no ad data may reach the
+player and the video must stay intact. `video/video.json` lets the extension learn new ad fields without an app update.
+
 ## Filter list licences
 
 The published lists are adaptations of the sources below and are distributed under the same terms

@@ -4,7 +4,7 @@
 Ablauf (auch lokal ausführbar: `swift build -c release && python3 build.py`):
 1. Alle Quellen aus lists.json laden und ihre Lizenzangabe prüfen.
 2. Mit still-check konvertieren: privacy.json, ads.json und ads-<sprache>.json (Basis + Sprachliste).
-3. Mit WebKit prüfen (Testseite + echte Seiten).
+3. Mit WebKit prüfen (Testseite + echte Seiten + YouTube mit dem Skript der Video-Erweiterung).
 4. Gegen die zuletzt veröffentlichte Fassung vergleichen: Regelzahl darf nicht um > 20 % einbrechen.
 5. Nur wenn alle harten Prüfungen bestehen: public/v1 mit manifest.json schreiben (Exit 0).
    Echte Seiten sind weich: Ausfälle landen in warnings.md (wird zum Issue), blockieren aber nicht.
@@ -91,6 +91,7 @@ def main() -> int:
 
     # Prüfung mit WebKit (Basis-Werbung + Privatsphäre, dazu die deutsche Variante als größte Sprachkombination)
     verify = subprocess.run([str(BIN), "verify", "--report", str(WORK / "report"),
+                             "--video-script", str(ROOT / "video/youtube-main.js"),
                              str(OUT / "ads.json"), str(OUT / "privacy.json")],
                             capture_output=True, text=True, timeout=1800)
     (WORK / "verify.log").write_text(verify.stdout + verify.stderr)
@@ -101,7 +102,8 @@ def main() -> int:
         for result in json.loads(report_json.read_text()):
             if not result["meaningful"] or result["passed"]:
                 continue
-            soft = result["name"].startswith("http") or result["name"] == "Genug aussagekräftige echte Seiten"
+            # Echte Seiten und YouTube sind weich: Sie melden sich als Issue, halten die Listen aber nicht auf
+            soft = result["name"].startswith(("http", "YouTube")) or result["name"] == "Genug aussagekräftige echte Seiten"
             (warnings if soft else failures).append(f"{result['name']}: " + "; ".join(result["details"]))
         (OUT / "report.md").write_text((WORK / "report/report.md").read_text())
 
@@ -136,6 +138,9 @@ def finish(blockers: dict) -> int:
         print("WARNUNG:", line)
     if failures:
         return 1
+    video = json.loads((ROOT / "video/video.json").read_text())
+    video.pop("comment", None)
+    (OUT / "video.json").write_text(json.dumps(video, ensure_ascii=False))
     (OUT / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1))
     (ROOT / "public/index.html").write_text(
         "<!doctype html><meta charset=utf-8><title>Still filters</title>"

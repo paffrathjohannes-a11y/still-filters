@@ -13,7 +13,7 @@ import WebKit
 let usage = """
 Aufruf:
   still-check convert --out <datei.json> [--max N] <liste|url> ...
-  still-check verify [--report <ordner>] [--no-sites] <blocker.json> ...
+  still-check verify [--report <ordner>] [--no-sites] [--video-script <youtube-main.js>] <blocker.json> ...
 """
 
 @MainActor
@@ -41,7 +41,8 @@ enum CLI {
         case "verify":
             let report = option("--report").map { URL(fileURLWithPath: $0) }
             let sites = !flag("--no-sites")
-            return await verify(files: rest.map { URL(fileURLWithPath: $0) }, report: report, sites: sites)
+            let videoScript = option("--video-script").flatMap { try? String(contentsOfFile: $0, encoding: .utf8) }
+            return await verify(files: rest.map { URL(fileURLWithPath: $0) }, report: report, sites: sites, videoScript: videoScript)
         default:
             print(usage)
             return 2
@@ -94,7 +95,7 @@ enum CLI {
         return 0
     }
 
-    static func verify(files: [URL], report: URL?, sites: Bool) async -> Int32 {
+    static func verify(files: [URL], report: URL?, sites: Bool, videoScript: String?) async -> Int32 {
         let runner = WebKitRunner()
         var lists: [WKContentRuleList] = []
         var header: [String] = []
@@ -118,6 +119,7 @@ enum CLI {
         let verifier = Verifier(runner: runner, lists: lists)
         results += await verifier.testPage()
         if sites { results += await verifier.realSites() }
+        if let videoScript { results += await VideoCheck(runner: runner, script: videoScript).run() }
 
         let failed = results.filter { $0.meaningful && !$0.passed }
         let markdown = Report.markdown(results: results, header: header)
