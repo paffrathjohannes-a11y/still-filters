@@ -5,6 +5,7 @@
     const w = window;
     if (w[MARK]) return;
     w[MARK] = true;
+    document.documentElement.setAttribute("data-still-video", "1");
     const AD_KEYS = /* @__PURE__ */ new Set([
       "adPlacements",
       "adSlots",

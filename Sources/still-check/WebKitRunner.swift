@@ -48,7 +48,7 @@ final class WebKitRunner: NSObject, WKNavigationDelegate {
 
     /// Lädt eine Seite mit den angegebenen Regellisten und liefert das Ergebnis eines Skripts danach.
     func load(html: String? = nil, url: URL, lists: [WKContentRuleList], settle: Duration, script: String,
-              pageScripts: [String] = [], cookies: [HTTPCookie] = []) async -> Any? {
+              pageScripts: [String] = [], cookies: [HTTPCookie] = [], userAgent: String? = nil) async -> Any? {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
         for list in lists { config.userContentController.add(list) }
@@ -59,7 +59,7 @@ final class WebKitRunner: NSObject, WKNavigationDelegate {
         }
         for cookie in cookies { await config.websiteDataStore.httpCookieStore.setCookie(cookie) }
         let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1280, height: 900), configuration: config)
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+        webView.customUserAgent = userAgent ?? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
         webView.navigationDelegate = self
         currentWebView = webView
         loadID += 1
