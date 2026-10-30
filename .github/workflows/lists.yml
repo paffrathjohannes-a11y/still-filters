@@ -1,0 +1,71 @@
+# Baut die Still-Blocker täglich aus freien Listen, prüft sie mit WebKit (macOS) und veröffentlicht sie
+# nur, wenn alle harten Prüfungen bestehen. Bei Fehlern bleibt die letzte gute Fassung online und es
+# entsteht ein Issue (GitHub schickt dazu eine E-Mail).
+name: Listen bauen und prüfen
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  issues: write
+
+concurrency:
+  group: lists
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Konverter bauen und testen
+        run: |
+          swift build -c release
+          swift test
+      - name: Listen bauen und prüfen
+        run: python3 build.py
+      - name: Prüfbericht sichern
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bericht
+          path: .build/lists/*.md
+          if-no-files-found: ignore
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+      - name: Warnungen als Issue melden
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -s .build/lists/warnings.md ] && grep -qv "Veröffentlichte Fassung nicht abrufbar" .build/lists/warnings.md; then
+            gh issue list --label warnung --state open --json number --jq 'length' | grep -q '^0$' && \
+            gh label create warnung --color FBCA04 --force >/dev/null && \
+            gh issue create --label warnung --title "Listen-Prüfung: Warnung $(date +%F)" --body-file .build/lists/warnings.md
+          fi
+      - name: Fehler als Issue melden
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create fehler --color D73A4A --force >/dev/null
+          body=$(cat .build/lists/failures.md 2>/dev/null; echo; echo "Lauf: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")
+          gh issue create --label fehler --title "Listen-Prüfung fehlgeschlagen $(date +%F)" --body "$body"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - id: pages
+        uses: actions/deploy-pages@v4

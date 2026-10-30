@@ -1,0 +1,33 @@
+{
+  "comment": "Quellen der Still-Blocker. Jede Quelle braucht eine Lizenz, die kommerzielle Nutzung erlaubt; 'licenceMarker' muss im Kopf der Liste stehen, sonst bricht der Bau ab (erkennt Lizenzwechsel).",
+  "sources": {
+    "easylist": { "name": "EasyList", "url": "https://easylist.to/easylist/easylist.txt", "licence": "CC BY-SA 3.0 (dual mit GPLv3)", "licenceMarker": "easylist.to/pages/licence" },
+    "easyprivacy": { "name": "EasyPrivacy", "url": "https://easylist.to/easylist/easyprivacy.txt", "licence": "CC BY-SA 3.0 (dual mit GPLv3)", "licenceMarker": "easylist.to/pages/licence" },
+    "fanboy-cookie": { "name": "EasyList Cookie List (Fanboy)", "url": "https://secure.fanboy.co.nz/fanboy-cookiemonster.txt", "licence": "CC BY 3.0", "licenceMarker": "creativecommons.org/licenses/by/3.0" },
+    "fanboy-annoyance": { "name": "Fanboy's Annoyance List", "url": "https://secure.fanboy.co.nz/fanboy-annoyance.txt", "licence": "CC BY 3.0", "licenceMarker": "creativecommons.org/licenses/by/3.0" },
+    "urlhaus": { "name": "malware-filter URLhaus (online)", "url": "https://malware-filter.gitlab.io/malware-filter/urlhaus-filter-agh-online.txt", "licence": "CC0", "licenceMarker": "urlhaus-filter#license" },
+    "phishing": { "name": "malware-filter Phishing", "url": "https://malware-filter.gitlab.io/malware-filter/phishing-filter-agh.txt", "licence": "CC0", "licenceMarker": "phishing-filter#license" },
+    "nocoin": { "name": "NoCoin", "url": "https://raw.githubusercontent.com/hoshsadiq/adblock-nocoin-list/master/nocoin.txt", "licence": "MIT", "licenceMarker": null },
+    "lang-de": { "name": "EasyList Germany", "url": "https://easylist.to/easylistgermany/easylistgermany.txt", "licence": "CC BY-SA 3.0", "licenceMarker": "easylist.to/pages/licence" },
+    "lang-fr": { "name": "Liste FR", "url": "https://easylist-downloads.adblockplus.org/liste_fr.txt", "licence": "CC BY-SA 3.0", "licenceMarker": "licenses/by-sa/3.0" },
+    "lang-it": { "name": "EasyList Italy", "url": "https://easylist-downloads.adblockplus.org/easylistitaly.txt", "licence": "CC BY-SA 3.0", "licenceMarker": "easylist.to/pages/licence" },
+    "lang-es": { "name": "EasyList Spanish", "url": "https://easylist-downloads.adblockplus.org/easylistspanish.txt", "licence": "CC BY-SA 3.0", "licenceMarker": "easylist.to/pages/licence" },
+    "lang-nl": { "name": "EasyList Dutch", "url": "https://easylist-downloads.adblockplus.org/easylistdutch.txt", "licence": "CC BY-SA 3.0", "licenceMarker": "easylist.to/pages/licence" },
+    "lang-pt": { "name": "EasyList Portuguese", "url": "https://easylist-downloads.adblockplus.org/easylistportuguese.txt", "licence": "CC BY-SA 3.0", "licenceMarker": "easylist.to/pages/licence" },
+    "lang-pl": { "name": "EasyList Polish", "url": "https://easylist-downloads.adblockplus.org/easylistpolish.txt", "licence": "CC BY-SA 3.0", "licenceMarker": "easylist.to/pages/licence" },
+    "lang-zh": { "name": "EasyList China", "url": "https://easylist-downloads.adblockplus.org/easylistchina.txt", "licence": "CC BY-SA 3.0", "licenceMarker": "easylist.to/pages/licence" },
+    "lang-ru": { "name": "RU AdList", "url": "https://easylist-downloads.adblockplus.org/advblock.txt", "licence": "CC BY 3.0", "licenceMarker": "licenses/by/3.0" },
+    "lang-he": { "name": "EasyList Hebrew", "url": "https://raw.githubusercontent.com/easylist/EasyListHebrew/master/EasyListHebrew.txt", "licence": "CC BY-SA 3.0", "licenceMarker": "easylist.to/pages/licence" },
+    "lang-cs": { "name": "EasyList Czech and Slovak", "url": "https://raw.githubusercontent.com/tomasko126/easylistczechandslovak/master/filters.txt", "licence": "CC BY-SA 4.0", "licenceMarker": "CC-BY-SA" },
+    "lang-ar": { "name": "Liste AR", "url": "https://easylist-downloads.adblockplus.org/Liste_AR.txt", "licence": "CC BY-SA 3.0", "licenceMarker": "licenses/by-sa/3.0" }
+  },
+  "blockers": {
+    "privacy": ["easyprivacy", "fanboy-cookie", "fanboy-annoyance", "phishing"],
+    "ads": ["easylist", "urlhaus", "nocoin"]
+  },
+  "languages": {
+    "de": "lang-de", "fr": "lang-fr", "it": "lang-it", "es": "lang-es", "nl": "lang-nl", "pt": "lang-pt",
+    "pl": "lang-pl", "zh": "lang-zh", "ru": "lang-ru", "uk": "lang-ru", "he": "lang-he", "cs": "lang-cs",
+    "sk": "lang-cs", "ar": "lang-ar"
+  }
+}
