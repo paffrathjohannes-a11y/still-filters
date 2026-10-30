@@ -1,0 +1,15 @@
+# Eigene Ergänzungen für den Schutz in allen Apps (DNS), gepflegt für Still.
+# Genau benannte Werbe- und Tracking-Server, die die freien Listen nur über Pfade sperren, weil dieselbe
+# Hauptdomain auch Erlaubtes ausliefert. Jeder Eintrag sperrt nur genau diesen Host und seine Subdomains.
+securepubads.g.doubleclick.net
+googleads.g.doubleclick.net
+stats.g.doubleclick.net
+pubads.g.doubleclick.net
+partner.googleadservices.com
+adservice.google.com
+adservice.google.de
+c.amazon-adsystem.com
+aax.amazon-adsystem.com
+aax-eu.amazon-adsystem.com
+sb.scorecardresearch.com
+bat.bing.com

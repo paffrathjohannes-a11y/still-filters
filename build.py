@@ -6,7 +6,9 @@ Ablauf (auch lokal ausführbar: `swift build -c release && python3 build.py`):
 2. Mit still-check konvertieren: privacy.json, ads.json und ads-<sprache>.json (Basis + Sprachliste).
 3. Mit WebKit prüfen (Testseite + echte Seiten + YouTube mit dem Skript der Video-Erweiterung).
 4. Gegen die zuletzt veröffentlichte Fassung vergleichen: Regelzahl darf nicht um > 20 % einbrechen.
-5. Nur wenn alle harten Prüfungen bestehen: public/v1 mit manifest.json schreiben (Exit 0).
+5. Domainliste für den Schutz in allen Apps ableiten (domains.py) und prüfen: bekannte Werbeserver drin,
+   wichtige Dienste (Apple, Google, Microsoft, Banken …) nie.
+6. Nur wenn alle harten Prüfungen bestehen: public/v1 mit manifest.json schreiben (Exit 0).
    Echte Seiten sind weich: Ausfälle landen in warnings.md (wird zum Issue), blockieren aber nicht.
 """
 import datetime
@@ -16,6 +18,8 @@ import pathlib
 import subprocess
 import sys
 import urllib.request
+
+import domains as dns
 
 ROOT = pathlib.Path(__file__).resolve().parent
 CONFIG = json.loads((ROOT / "lists.json").read_text())
@@ -118,16 +122,34 @@ def main() -> int:
     except Exception:
         warnings.append("Veröffentlichte Fassung nicht abrufbar – kein Vergleich der Regelzahlen (beim ersten Lauf normal)")
 
-    return finish({**outputs, **variants})
+    # Domainliste für den Schutz in allen Apps (DNS auf dem Gerät)
+    lines = []
+    for source_id in CONFIG["blockers"]["ads"] + CONFIG["blockers"]["privacy"]:
+        lines += paths[source_id].read_text(encoding="utf-8", errors="replace").splitlines()
+    extra = [l.strip() for l in (ROOT / "dns-extra.txt").read_text().splitlines() if l.strip() and not l.startswith("#")]
+    domain_list = dns.build(lines, extra)
+    domain_set = set(domain_list)
+    missing = [d for d in dns.MUST_BLOCK if not dns.is_blocked(d, domain_set)]
+    wrong = [d for d in dns.MUST_NOT_BLOCK if dns.is_blocked(d, domain_set)]
+    if missing:
+        failures.append("DNS-Liste blockt bekannte Werbeserver nicht: " + ", ".join(missing))
+    if wrong:
+        failures.append("DNS-Liste würde wichtige Dienste sperren: " + ", ".join(wrong))
+    data = ("\n".join(domain_list) + "\n").encode()
+    (OUT / "domains.txt").write_bytes(data)
+    dns_info = {"file": "domains.txt", "count": len(domain_list), "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+
+    return finish({**outputs, **variants}, dns_info)
 
 
-def finish(blockers: dict) -> int:
+def finish(blockers: dict, dns_info: dict | None = None) -> int:
     languages = {code: f"ads-{source_id.removeprefix('lang-')}" for code, source_id in CONFIG["languages"].items()}
     manifest = {
         "version": 1,
         "generated": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "blockers": blockers,
         "languages": languages,
+        "dns": dns_info,
         "attribution": [{"name": s["name"], "licence": s["licence"], "url": s["url"]} for s in CONFIG["sources"].values()],
     }
     (WORK / "warnings.md").write_text("\n".join(f"- {w}" for w in warnings))
