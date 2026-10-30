@@ -51,6 +51,8 @@ final class WebKitRunner: NSObject, WKNavigationDelegate {
               pageScripts: [String] = [], cookies: [HTTPCookie] = [], userAgent: String? = nil) async -> Any? {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
+        // Videos sollen wie bei echten Nutzern losspielen, sonst lädt YouTube keine Werbung
+        config.mediaTypesRequiringUserActionForPlayback = []
         for list in lists { config.userContentController.add(list) }
         // Wie ein Content-Script mit world: MAIN zum Dokumentstart
         for source in pageScripts {

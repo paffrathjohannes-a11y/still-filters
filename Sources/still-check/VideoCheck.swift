@@ -38,6 +38,27 @@ struct VideoCheck {
                             title: document.title + (live ? ' [Player]' : ' [eingebettet]') });
     """
 
+    /// Protokolliert API-Abrufe der Seite (fetch und XHR) für die Diagnose in window.__stillNet
+    static let networkLog = """
+    (() => {
+      window.__stillNet = [];
+      const f = window.fetch;
+      window.fetch = function (input, init) {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        if (url.includes('youtubei')) window.__stillNet.push('fetch ' + url.split('?')[0]);
+        return f.apply(this, arguments);
+      };
+      const open = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function (method, url) {
+        if (String(url).includes('youtubei')) {
+          const xhr = this;
+          xhr.addEventListener('load', () => window.__stillNet.push('xhr ' + String(url).split('?')[0] + ' type=' + xhr.responseType));
+        }
+        return open.apply(this, arguments);
+      };
+    })();
+    """
+
     private struct Probe: Decodable { let ads: Bool; let enforcement: Bool; let video: Bool; let title: String }
 
     static let iPhoneAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
@@ -65,7 +86,7 @@ struct VideoCheck {
                 details: [
                     "ohne Skript: Werbedaten \(without.ads ? "ja" : "nein"), Video \(without.video ? "ja" : "nein")",
                     "mit Skript: Werbedaten \(with.ads ? "JA" : "nein"), Anti-Adblock \(with.enforcement ? "JA" : "nein"), Video \(with.video ? "ja" : "FEHLT")",
-                    "Titel: \(with.title.prefix(60))",
+                    "Titel: \(with.title.prefix(700))",
                 ]))
         }
         }
@@ -73,8 +94,12 @@ struct VideoCheck {
     }
 
     private func probe(_ url: URL, scripts: [String], cookies: [HTTPCookie], agent: String?) async -> Probe? {
-        guard let json = await runner.load(url: url, lists: [], settle: .seconds(5), script: Self.probe,
-                                           pageScripts: scripts, cookies: cookies, userAgent: agent) as? String else { return nil }
+        // Diagnose: STILL_PROBE=<datei.js> ersetzt die Abfrage, STILL_SETTLE=<sekunden> die Wartezeit
+        let env = ProcessInfo.processInfo.environment
+        let probeScript = env["STILL_PROBE"].flatMap { try? String(contentsOfFile: $0, encoding: .utf8) } ?? Self.probe
+        let settle = env["STILL_SETTLE"].flatMap(Int.init) ?? 5
+        guard let json = await runner.load(url: url, lists: [], settle: .seconds(settle), script: probeScript,
+                                           pageScripts: [Self.networkLog] + scripts, cookies: cookies, userAgent: agent) as? String else { return nil }
         return try? JSONDecoder().decode(Probe.self, from: Data(json.utf8))
     }
 }

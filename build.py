@@ -164,6 +164,9 @@ def finish(blockers: dict, dns_info: dict | None = None) -> int:
     video.pop("comment", None)
     (OUT / "video.json").write_text(json.dumps(video, ensure_ascii=False))
     (OUT / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1))
+    # Datenschutz- und Hilfeseite der App
+    for page in (ROOT / "site").iterdir():
+        (ROOT / "public" / page.name).write_bytes(page.read_bytes())
     (ROOT / "public/index.html").write_text(
         "<!doctype html><meta charset=utf-8><title>Still filters</title>"
         "<p>Safari content blocker lists for the Still app, built daily from free filter lists. "
