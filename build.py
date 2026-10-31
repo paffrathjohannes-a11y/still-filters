@@ -4,7 +4,9 @@
 Ablauf (auch lokal ausführbar: `swift build -c release && python3 build.py`):
 1. Alle Quellen aus lists.json laden und ihre Lizenzangabe prüfen.
 2. Mit still-check konvertieren: privacy.json, ads.json und ads-<sprache>.json (Basis + Sprachliste).
-3. Mit WebKit prüfen (Testseite + echte Seiten + YouTube mit dem Skript der Video-Erweiterung).
+3. Mit WebKit prüfen (Testseite + echte Seiten + YouTube mit dem Skript der Video-Erweiterung) und jede
+   Sprachvariante zusätzlich hart mit der Testseite; dazu dürfen wichtige Dienste (domains.MUST_NOT_BLOCK) als
+   Hauptseite nie geblockt werden. Regeln über Safaris Limit verworfen: bei ads/privacy ein Fehler.
 4. Gegen die zuletzt veröffentlichte Fassung vergleichen: Regelzahl darf nicht um > 20 % einbrechen.
 5. Domainliste für den Schutz in allen Apps ableiten (domains.py) und prüfen: bekannte Werbeserver drin,
    wichtige Dienste (Apple, Google, Microsoft, Banken …) nie.
@@ -28,6 +30,12 @@ WORK = ROOT / ".build/lists"
 OUT = ROOT / "public/v1"
 PUBLISHED = "https://paffrathjohannes-a11y.github.io/still-filters/v1/manifest.json"
 MAX_DROP = 0.2
+BASE_LISTS = ("ads", "privacy")
+VIDEO_MAX_BYTES = 64 * 1024
+# Diese Felder tragen bei YouTube Video, Player und Seite. Stünden sie in video.json, entfernte die
+# Video-Erweiterung sie aus jeder Antwort – YouTube wäre für alle Nutzer kaputt.
+VIDEO_FORBIDDEN_KEYS = {"contents", "streamingData", "videoDetails", "responseContext", "playabilityStatus",
+                        "playerConfig", "microformat", "captions", "frameworkUpdates"}
 
 failures: list[str] = []
 warnings: list[str] = []
@@ -41,6 +49,9 @@ def fetch(source_id: str) -> pathlib.Path:
         data = response.read()
     path.write_bytes(data)
     head = data[:6000].decode("utf-8", errors="replace")
+    # Eine Fehlerseite (HTML, Captcha, Wartungshinweis) darf nie als Liste durchgehen
+    if not looks_like_filter_list(head):
+        failures.append(f"{source['name']}: Antwort sieht nicht wie eine Filterliste aus (kein „[Adblock“- oder „! Title:“-Kopf)")
     marker = source.get("licenceMarker")
     if marker and marker.lower() not in head.lower():
         failures.append(f"Lizenzangabe von {source['name']} hat sich geändert (erwartet „{marker}“) – Liste nicht verwendet")
@@ -48,6 +59,40 @@ def fetch(source_id: str) -> pathlib.Path:
     if lines < 100:
         failures.append(f"{source['name']}: nur {lines} Regeln geladen")
     return path
+
+
+def looks_like_filter_list(head: str) -> bool:
+    start = head.lstrip("\ufeff \t\r\n")
+    if start[:200].lower().startswith(("<!doctype", "<html", "<?xml", "<head", "<body")):
+        return False
+    first_lines = start.splitlines()[:40]
+    return start.startswith("[Adblock") or any(line.lower().startswith("! title:") for line in first_lines)
+
+
+def check_video(path: pathlib.Path) -> bytes | None:
+    """Prüft video/video.json und liefert die zu veröffentlichenden Bytes (ohne Kommentar) oder None."""
+    try:
+        video = json.loads(path.read_text())
+    except Exception as error:
+        failures.append(f"video.json ist kein gültiges JSON: {error}")
+        return None
+    video.pop("comment", None)
+    data = json.dumps(video, ensure_ascii=False).encode()
+    if len(data) > VIDEO_MAX_BYTES:
+        failures.append(f"video.json zu groß ({len(data)} Bytes, höchstens {VIDEO_MAX_BYTES})")
+    youtube = video.get("youtube", {})
+    if not isinstance(youtube, dict):
+        failures.append("video.json: „youtube“ muss ein Objekt sein")
+        return None
+    for field in ("adKeys", "adRenderers"):
+        values = youtube.get(field, [])
+        if not isinstance(values, list) or not all(isinstance(v, str) and v.strip() for v in values):
+            failures.append(f"video.json: youtube.{field} muss eine Liste nicht leerer Texte sein")
+            continue
+        bad = sorted({v for v in values if v.strip() in VIDEO_FORBIDDEN_KEYS})
+        if bad:
+            failures.append(f"video.json: youtube.{field} enthält tragende YouTube-Felder (würde YouTube zerstören): " + ", ".join(bad))
+    return data
 
 
 def convert(name: str, sources: list[str], paths: dict[str, pathlib.Path]) -> dict:
@@ -62,8 +107,36 @@ def convert(name: str, sources: list[str], paths: dict[str, pathlib.Path]) -> di
     stats = json.loads(stats_file.read_text())
     stats_file.unlink()
     data = out.read_bytes()
+    discarded = stats.get("discardedOverLimit", 0)
+    if discarded > 0:
+        message = f"{name}: {discarded} Regeln über Safaris Limit von 150.000 verworfen – Liste unvollständig"
+        print(("FEHLER: " if name in BASE_LISTS else "WARNUNG: ") + message + " !!!", flush=True)
+        (failures if name in BASE_LISTS else warnings).append(message)
     return {"file": out.name, "rules": stats["safariRules"], "sha256": hashlib.sha256(data).hexdigest(),
-            "bytes": len(data), "sources": sources, "unsupported": stats.get("unsupported", {})}
+            "bytes": len(data), "sources": sources, "unsupported": stats.get("unsupported", {}),
+            "discardedOverLimit": discarded}
+
+
+def verify(label: str, files: list[pathlib.Path], extra: list[str], report: pathlib.Path, soft_names=True,
+           timeout: int = 1800) -> None:
+    """still-check verify; harte Ergebnisse → failures, echte Seiten/YouTube → warnings."""
+    args = [str(BIN), "verify", "--report", str(report), "--must-load", ",".join(dns.MUST_NOT_BLOCK)] + extra
+    try:
+        result = subprocess.run(args + [str(f) for f in files], capture_output=True, text=True, timeout=timeout)
+        output = result.stdout + result.stderr
+    except subprocess.TimeoutExpired as error:
+        output = f"Zeitüberschreitung nach {timeout} s\n{error.stdout or ''}"
+    (WORK / f"verify-{label}.log").write_text(output if isinstance(output, str) else output.decode(errors="replace"))
+    report_json = report / "report.json"
+    if not report_json.exists():
+        failures.append(f"WebKit-Prüfung {label} lieferte keinen Bericht")
+        return
+    for result in json.loads(report_json.read_text()):
+        if not result["meaningful"] or result["passed"]:
+            continue
+        # Echte Seiten und YouTube sind weich: Sie melden sich als Issue, halten die Listen aber nicht auf
+        soft = soft_names and (result["name"].startswith(("http", "YouTube")) or result["name"] == "Genug aussagekräftige echte Seiten")
+        (warnings if soft else failures).append(f"{label} – {result['name']}: " + "; ".join(result["details"]))
 
 
 def main() -> int:
@@ -93,23 +166,19 @@ def main() -> int:
         if info and info["rules"] > 150_000:
             failures.append(f"{name}: {info['rules']} Regeln über Safaris Limit")
 
-    # Prüfung mit WebKit (Basis-Werbung + Privatsphäre, dazu die deutsche Variante als größte Sprachkombination)
-    verify = subprocess.run([str(BIN), "verify", "--report", str(WORK / "report"),
-                             "--video-script", str(ROOT / "video/youtube-main.js"),
-                             str(OUT / "ads.json"), str(OUT / "privacy.json")],
-                            capture_output=True, text=True, timeout=1800)
-    (WORK / "verify.log").write_text(verify.stdout + verify.stderr)
-    report_json = WORK / "report/report.json"
-    if not report_json.exists():
-        failures.append("WebKit-Prüfung lieferte keinen Bericht")
-    else:
-        for result in json.loads(report_json.read_text()):
-            if not result["meaningful"] or result["passed"]:
-                continue
-            # Echte Seiten und YouTube sind weich: Sie melden sich als Issue, halten die Listen aber nicht auf
-            soft = result["name"].startswith(("http", "YouTube")) or result["name"] == "Genug aussagekräftige echte Seiten"
-            (warnings if soft else failures).append(f"{result['name']}: " + "; ".join(result["details"]))
-        (OUT / "report.md").write_text((WORK / "report/report.md").read_text())
+    video_data = check_video(ROOT / "video/video.json")
+
+    # Prüfung mit WebKit: Basis-Werbung + Privatsphäre vollständig (Testseite, echte Seiten, YouTube) …
+    if (OUT / "ads.json").exists() and (OUT / "privacy.json").exists():
+        verify("ads+privacy", [OUT / "ads.json", OUT / "privacy.json"],
+               ["--video-script", str(ROOT / "video/youtube-main.js")], WORK / "report")
+        if (WORK / "report/report.md").exists():
+            (OUT / "report.md").write_text((WORK / "report/report.md").read_text())
+        # … und jede Sprachvariante hart mit der Testseite, so wie Safari sie zusammen mit privacy.json lädt
+        for name, info in sorted(variants.items()):
+            if info:
+                verify(f"{name}+privacy", [OUT / f"{name}.json", OUT / "privacy.json"], ["--no-sites"],
+                       WORK / f"report-{name}", soft_names=False, timeout=900)
 
     # Vergleich mit der veröffentlichten Fassung
     try:
@@ -139,10 +208,14 @@ def main() -> int:
     (OUT / "domains.txt").write_bytes(data)
     dns_info = {"file": "domains.txt", "count": len(domain_list), "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
 
-    return finish({**outputs, **variants}, dns_info)
+    video_info = None
+    if video_data is not None:
+        video_info = {"file": "video.json", "sha256": hashlib.sha256(video_data).hexdigest(), "bytes": len(video_data)}
+    return finish({**outputs, **variants}, dns_info, video_data, video_info)
 
 
-def finish(blockers: dict, dns_info: dict | None = None) -> int:
+def finish(blockers: dict, dns_info: dict | None = None, video_data: bytes | None = None,
+           video_info: dict | None = None) -> int:
     languages = {code: f"ads-{source_id.removeprefix('lang-')}" for code, source_id in CONFIG["languages"].items()}
     manifest = {
         "version": 1,
@@ -150,6 +223,8 @@ def finish(blockers: dict, dns_info: dict | None = None) -> int:
         "blockers": blockers,
         "languages": languages,
         "dns": dns_info,
+        # Zusatzfeld (v1-Apps ignorieren es): Prüfsumme der Video-Konfiguration
+        "video": video_info,
         "attribution": [{"name": s["name"], "licence": s["licence"], "url": s["url"]} for s in CONFIG["sources"].values()],
     }
     (WORK / "warnings.md").write_text("\n".join(f"- {w}" for w in warnings))
@@ -158,11 +233,9 @@ def finish(blockers: dict, dns_info: dict | None = None) -> int:
         print("FEHLER:", line)
     for line in warnings:
         print("WARNUNG:", line)
-    if failures:
+    if failures or video_data is None:
         return 1
-    video = json.loads((ROOT / "video/video.json").read_text())
-    video.pop("comment", None)
-    (OUT / "video.json").write_text(json.dumps(video, ensure_ascii=False))
+    (OUT / "video.json").write_bytes(video_data)
     (OUT / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1))
     # Datenschutz- und Hilfeseite der App
     for page in (ROOT / "site").iterdir():

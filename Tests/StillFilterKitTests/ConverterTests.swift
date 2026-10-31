@@ -35,6 +35,23 @@ final class ParserTests: XCTestCase {
                        .cosmetic(CosmeticRule(isException: true, includeDomains: ["example.com"], selector: ".ad")))
     }
 
+    func testGenericPageSelectorsAreRejected() {
+        for selector in ["html", "body", ":root", "*", "main", "#content", "body > div.ad", "html.no-js .x",
+                         "*[id^=ad]", "main .ad", "#content > .promo", ".ad-box, body", "BODY", "body:not(.x)"] {
+            XCTAssertEqual(RuleParser.parse("##" + selector), .unsupported("page-selector"), selector)
+            XCTAssertEqual(RuleParser.parse("~example.com##" + selector), .unsupported("page-selector"), selector)
+        }
+        // Nur als ganzes Token: ähnliche Namen sind normale Werbeflächen
+        for selector in ["#content-ad", ".main-ad", "mainbar", "#contentAd", ".body-banner", "htmlads", "div[class=\"body\"]",
+                         ".a:is(main, body)"] {
+            XCTAssertEqual(RuleParser.parse("##" + selector), .cosmetic(CosmeticRule(selector: selector)), selector)
+        }
+        // Für einzelne Seiten und als Ausnahme bleibt es erlaubt
+        XCTAssertEqual(RuleParser.parse("example.com##body > .overlay"),
+                       .cosmetic(CosmeticRule(includeDomains: ["example.com"], selector: "body > .overlay")))
+        XCTAssertEqual(RuleParser.parse("#@#body"), .cosmetic(CosmeticRule(isException: true, selector: "body")))
+    }
+
     func testUnsupportedIsReportedNotDropped() {
         XCTAssertEqual(RuleParser.parse("youtube.com##+js(json-prune, playerResponse.adPlacements)"), .unsupported("scriptlet"))
         XCTAssertEqual(RuleParser.parse("example.com##div:has-text(Anzeige)"), .unsupported("procedural-selector"))

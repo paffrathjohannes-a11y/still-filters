@@ -1,0 +1,7 @@
+# Hält die festgenagelten GitHub-Actions (Commit-SHAs in .github/workflows) aktuell.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

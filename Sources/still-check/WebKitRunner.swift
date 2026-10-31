@@ -89,6 +89,30 @@ final class WebKitRunner: NSObject, WKNavigationDelegate {
         return result
     }
 
+    enum MainFrameResult { case allowed, blocked, unknown }
+
+    /// Ruft eine Adresse als Hauptseite auf und meldet, ob der Content-Blocker den Abruf gestoppt hat.
+    /// Der Seiteninhalt wird nicht geladen: Sobald eine Antwort kommt, ist klar, dass nichts geblockt wurde.
+    func probeMainFrame(_ url: URL, lists: [WKContentRuleList], timeout: Duration = .seconds(20)) async -> MainFrameResult {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .nonPersistent()
+        for list in lists { config.userContentController.add(list) }
+        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: config)
+        let probe = MainFrameProbe()
+        webView.navigationDelegate = probe
+        let result = await withCheckedContinuation { (continuation: CheckedContinuation<MainFrameResult, Never>) in
+            probe.finish = { continuation.resume(returning: $0) }
+            webView.load(URLRequest(url: url, timeoutInterval: 15))
+            Task { @MainActor in
+                try? await Task.sleep(for: timeout)
+                probe.complete(.unknown)
+            }
+        }
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        return result
+    }
+
     /// Ergebnis der Operation oder nil nach Ablauf der Zeit. Anders als eine TaskGroup wartet das nicht
     /// auf eine hängende Operation, die sich nicht abbrechen lässt.
     static func firstOf<T>(_ timeout: Duration, _ operation: @escaping @MainActor () async -> T?) async -> T? {
@@ -120,5 +144,41 @@ final class WebKitRunner: NSObject, WKNavigationDelegate {
 
     nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         Task { @MainActor in if webView === self.currentWebView { self.finishNavigation() } }
+    }
+}
+
+/// Navigations-Delegate für `probeMainFrame`: beendet genau einmal.
+@MainActor
+final class MainFrameProbe: NSObject, WKNavigationDelegate {
+    var finish: ((WebKitRunner.MainFrameResult) -> Void)?
+
+    func complete(_ result: WebKitRunner.MainFrameResult) {
+        guard let finish else { return }
+        self.finish = nil
+        finish(result)
+    }
+
+    nonisolated static func isContentBlocked(_ error: Error) -> Bool {
+        let error = error as NSError
+        // WebKitErrorFrameLoadBlockedByContentBlocker
+        return error.domain == "WebKitErrorDomain" && error.code == 104
+    }
+
+    nonisolated func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                             decisionHandler: @escaping @MainActor (WKNavigationResponsePolicy) -> Void) {
+        MainActor.assumeIsolated {
+            decisionHandler(.cancel)
+            complete(.allowed)
+        }
+    }
+
+    nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        let blocked = Self.isContentBlocked(error)
+        MainActor.assumeIsolated { complete(blocked ? .blocked : .allowed) }
+    }
+
+    nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        let blocked = Self.isContentBlocked(error)
+        MainActor.assumeIsolated { complete(blocked ? .blocked : .allowed) }
     }
 }

@@ -40,7 +40,8 @@ enum TestPage {
 
     /// Ausblende-Selektoren, die in EasyList bzw. den Cookie-Listen stehen
     static let hiddenSelectors = ["#sidebar-ads", ".ad-slot", ".google-ads", ".ad_wrapper", "#cookie-banner"]
-    static let visibleSelectors = ["#content", ".article"]
+    /// Dürfen nie ausgeblendet sein: die Seite selbst und ihr Hauptinhalt
+    static let visibleSelectors = ["html", "body", "#content", ".article"]
 
     static var html: String {
         let hidden = hiddenSelectors.map { selector -> String in
@@ -63,10 +64,14 @@ enum TestPage {
         });
         const loads = {};
         await Promise.all([\(list)].map(async ([url, kind]) => { loads[url] = await load(url, kind); }));
+        // Tatsächlich gerendert? Erfasst auch ausgeblendete Eltern, visibility und Opazität – nicht nur display
+        const isHidden = el => typeof el.checkVisibility === 'function'
+            ? !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
+            : el.getClientRects().length === 0;
         const hidden = {};
         for (const sel of [\(selectors)]) {
             const el = document.querySelector(sel);
-            hidden[sel] = el ? getComputedStyle(el).display === 'none' : null;
+            hidden[sel] = el ? isHidden(el) : null;
         }
         return JSON.stringify({ loads, hidden });
         """
@@ -100,11 +105,31 @@ enum RealSites {
         "chartbeat.com", "yieldlove.com", "permutive.com", "bing.com/action", "bat.bing.com", "pinimg.com/ct",
     ]
 
+    /// innerText allein reicht nicht: Ist body ausgeblendet, liefert innerText trotzdem den ganzen Text.
+    /// Deshalb zählt nur Text in Elementen, die wirklich gerendert sind und eine Fläche im Fenster haben.
     static let script = """
     const resources = performance.getEntriesByType('resource').map(e => e.name);
+    const visible = el => (typeof el.checkVisibility === 'function'
+            ? el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
+            : el.getClientRects().length > 0)
+        && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0;
+    const body = document.body;
+    const bodyVisible = !!body && visible(document.documentElement) && visible(body);
+    let visibleTextLength = 0;
+    if (bodyVisible) {
+        const blocks = document.querySelectorAll('p, h1, h2, h3, h4, li, a, span, td, article, section');
+        for (let i = 0; i < blocks.length && i < 4000 && visibleTextLength < 5000; i++) {
+            const el = blocks[i];
+            // Nur „Blätter“ zählen, sonst wird verschachtelter Text mehrfach gezählt
+            if (el.querySelector('p, h1, h2, h3, h4, li, a, span, td, article, section')) continue;
+            if (visible(el)) visibleTextLength += (el.innerText || '').trim().length;
+        }
+    }
     return JSON.stringify({
         title: document.title,
-        textLength: (document.body ? document.body.innerText : '').length,
+        textLength: body ? body.innerText.length : 0,
+        bodyVisible,
+        visibleTextLength,
         resources
     });
     """
@@ -174,11 +199,12 @@ struct Verifier {
             }
             let before = RealSites.adRequests(without.resources)
             let after = RealSites.adRequests(with.resources)
-            let healthy = with.textLength > 300 && !with.title.isEmpty
+            let healthy = with.bodyVisible && with.visibleTextLength > 300 && !with.title.isEmpty
             let meaningful = !before.isEmpty
             let reduced = before.isEmpty || after.count <= max(1, before.count / 10)
             var details = ["Werbe-/Tracker-Anfragen ohne Blocker: \(before.count), mit Blocker: \(after.count)",
-                           "Seite intakt: \(healthy ? "ja" : "NEIN") (Titel „\(with.title.prefix(60))“, \(with.textLength) Zeichen Text)"]
+                           "Seite intakt: \(healthy ? "ja" : "NEIN") (Titel „\(with.title.prefix(60))“, body \(with.bodyVisible ? "sichtbar" : "AUSGEBLENDET"), "
+                           + "\(with.visibleTextLength) Zeichen sichtbarer Text, \(with.textLength) Zeichen insgesamt)"]
             details += Set(after.compactMap { URL(string: $0)?.host }).sorted().prefix(5).map { "noch durchgekommen: \($0)" }
             results.append(CheckResult(name: site, passed: healthy && reduced, meaningful: meaningful, details: details))
         }
@@ -191,7 +217,28 @@ struct Verifier {
         return results
     }
 
-    private struct PageSnapshot: Decodable { let title: String; let textLength: Int; let resources: [String] }
+    private struct PageSnapshot: Decodable {
+        let title: String; let textLength: Int; let bodyVisible: Bool; let visibleTextLength: Int; let resources: [String]
+    }
+
+    /// Hauptseiten wichtiger Dienste dürfen nie als Ganzes geblockt werden (wäre für Nutzer eine leere Seite).
+    /// WebKit meldet einen vom Content-Blocker gestoppten Seitenabruf als Fehler 104 der WebKitErrorDomain;
+    /// Netzfehler zählen nicht als geblockt.
+    func mainFrames(_ hosts: [String]) async -> [CheckResult] {
+        var blocked: [String] = [], unclear: [String] = []
+        for host in hosts {
+            guard let url = URL(string: "https://\(host)/") else { unclear.append(host); continue }
+            switch await runner.probeMainFrame(url, lists: lists) {
+            case .blocked: blocked.append(host)
+            case .allowed: break
+            case .unknown: unclear.append(host)
+            }
+        }
+        var details = ["\(hosts.count - blocked.count - unclear.count) von \(hosts.count) Hauptseiten geladen bzw. nicht vom Blocker gestoppt"]
+        details += blocked.map { "Hauptseite geblockt: \($0)" }
+        details += unclear.map { "ohne Ergebnis (Zeitüberschreitung): \($0)" }
+        return [CheckResult(name: "Wichtige Dienste als Hauptseite nicht geblockt", passed: blocked.isEmpty, details: details)]
+    }
 
     private func snapshot(_ url: URL, lists: [WKContentRuleList]) async -> PageSnapshot? {
         guard let json = await runner.load(url: url, lists: lists, settle: .seconds(6), script: RealSites.script) as? String else { return nil }

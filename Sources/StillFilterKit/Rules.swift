@@ -115,6 +115,10 @@ public enum RuleParser {
             guard let valid = DomainCheck.normalize(domain) else { return .unsupported("domain-format") }
             if negated { rule.excludeDomains.append(valid) } else { rule.includeDomains.append(valid) }
         }
+        // Allgemeine Regeln, die die ganze Seite oder ihren Hauptinhalt treffen, würden überall alles ausblenden
+        if !rule.isException, rule.includeDomains.isEmpty, SelectorCheck.targetsPage(selector) {
+            return .unsupported("page-selector")
+        }
         return .cosmetic(rule)
     }
 
@@ -258,6 +262,46 @@ enum DomainCheck {
 }
 
 enum SelectorCheck {
+    /// Selektoren, die – allgemein (ohne Domain) angewendet – die Seite selbst oder ihren Hauptinhalt treffen können
+    static let pageRoots = ["html", "body", ":root", "*", "main", "#content"]
+
+    /// true, wenn einer der kommagetrennten Teilselektoren mit html, body, :root, *, main oder #content beginnt
+    /// (als ganzes Token: „#content-ad“, „.main“ oder „mainbar“ zählen nicht).
+    static func targetsPage(_ selector: String) -> Bool {
+        splitTopLevel(selector).contains { part in
+            let lower = part.trimmingCharacters(in: .whitespaces).lowercased()
+            return pageRoots.contains { root in
+                guard lower.hasPrefix(root) else { return false }
+                if root == "*" { return true }
+                guard let next = lower.dropFirst(root.count).first else { return true }
+                return !(next.isLetter || next.isNumber || next == "-" || next == "_")
+            }
+        }
+    }
+
+    /// Teilt an Kommas außerhalb von Klammern und Anführungszeichen
+    static func splitTopLevel(_ selector: String) -> [Substring] {
+        var parts: [Substring] = []
+        var depth = 0
+        var quote: Character?
+        var start = selector.startIndex
+        for index in selector.indices {
+            let char = selector[index]
+            if let open = quote { if char == open { quote = nil }; continue }
+            switch char {
+            case "\"", "'": quote = char
+            case "(", "[": depth += 1
+            case ")", "]": depth -= 1
+            case "," where depth == 0:
+                parts.append(selector[start..<index])
+                start = selector.index(after: index)
+            default: break
+            }
+        }
+        parts.append(selector[start...])
+        return parts
+    }
+
     /// Grobe Plausibilitätsprüfung. Ein einziger ungültiger Selektor lässt WebKit die ganze Liste ablehnen;
     /// die endgültige Prüfung macht `still-check validate` mit echtem WebKit.
     static func isPlausible(_ selector: String) -> Bool {

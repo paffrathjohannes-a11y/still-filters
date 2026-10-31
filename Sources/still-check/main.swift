@@ -7,13 +7,14 @@ import WebKit
 //   still-check convert --out ads.json [--max 150000] <Liste|URL> …
 //       Filterlisten → Safari-JSON. Prüft das Ergebnis mit WebKit und entfernt Regeln, die WebKit ablehnt.
 //
-//   still-check verify [--report <Ordner>] [--no-sites] <blocker.json> …
+//   still-check verify [--report <Ordner>] [--no-sites] [--must-load host,host,…] <blocker.json> …
 //       Testseite + echte Seiten mit und ohne Blocker. Exit-Code 1, wenn eine aussagekräftige Prüfung scheitert.
+//       --must-load: diese Hosts dürfen als Hauptseite nicht geblockt werden (harte Prüfung).
 
 let usage = """
 Aufruf:
   still-check convert --out <datei.json> [--max N] <liste|url> ...
-  still-check verify [--report <ordner>] [--no-sites] [--video-script <youtube-main.js>] <blocker.json> ...
+  still-check verify [--report <ordner>] [--no-sites] [--video-script <youtube-main.js>] [--must-load host,host] <blocker.json> ...
 """
 
 @MainActor
@@ -42,7 +43,9 @@ enum CLI {
             let report = option("--report").map { URL(fileURLWithPath: $0) }
             let sites = !flag("--no-sites")
             let videoScript = option("--video-script").flatMap { try? String(contentsOfFile: $0, encoding: .utf8) }
-            return await verify(files: rest.map { URL(fileURLWithPath: $0) }, report: report, sites: sites, videoScript: videoScript)
+            let mustLoad = option("--must-load").map { $0.split(separator: ",").map(String.init) } ?? []
+            return await verify(files: rest.map { URL(fileURLWithPath: $0) }, report: report, sites: sites,
+                                videoScript: videoScript, mustLoad: mustLoad)
         default:
             print(usage)
             return 2
@@ -85,6 +88,9 @@ enum CLI {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try? encoder.encode(stats).write(to: out.deletingPathExtension().appendingPathExtension("stats.json"))
 
+        if stats.discardedOverLimit > 0 {
+            print("WARNUNG: \(stats.discardedOverLimit) Netzwerkregeln über dem Safari-Limit von \(max) verworfen – die Liste ist unvollständig!")
+        }
         print("Safari-Regeln: \(validated.valid.count) (von WebKit abgelehnt und entfernt: \(validated.removed.count), über Limit: \(stats.discardedOverLimit))")
         print("Quellregeln: \(stats.networkRules) Netzwerk, \(stats.cosmeticRules) Ausblenden; nicht abbildbar: \(stats.unsupportedTotal)")
         for (reason, count) in stats.unsupported.sorted(by: { $0.value > $1.value }).prefix(8) {
@@ -95,7 +101,7 @@ enum CLI {
         return 0
     }
 
-    static func verify(files: [URL], report: URL?, sites: Bool, videoScript: String?) async -> Int32 {
+    static func verify(files: [URL], report: URL?, sites: Bool, videoScript: String?, mustLoad: [String] = []) async -> Int32 {
         let runner = WebKitRunner()
         var lists: [WKContentRuleList] = []
         var header: [String] = []
@@ -118,6 +124,7 @@ enum CLI {
 
         let verifier = Verifier(runner: runner, lists: lists)
         results += await verifier.testPage()
+        if !mustLoad.isEmpty { results += await verifier.mainFrames(mustLoad) }
         if sites { results += await verifier.realSites() }
         if let videoScript { results += await VideoCheck(runner: runner, script: videoScript).run() }
 
