@@ -5,13 +5,15 @@ Ablauf (auch lokal ausführbar: `swift build -c release && python3 build.py`):
 1. Alle Quellen aus lists.json laden und ihre Lizenzangabe prüfen.
 2. Mit still-check konvertieren: privacy.json, ads.json und ads-<sprache>.json (Basis + Sprachliste).
 3. Mit WebKit prüfen (Testseite + echte Seiten + YouTube mit dem Skript der Video-Erweiterung) und jede
-   Sprachvariante zusätzlich hart mit der Testseite; dazu dürfen wichtige Dienste (domains.MUST_NOT_BLOCK) als
-   Hauptseite nie geblockt werden. Regeln über Safaris Limit verworfen: bei ads/privacy ein Fehler.
+   Sprachvariante zusätzlich hart mit der Testseite und zwei echten Seiten; dazu dürfen wichtige Dienste
+   (domains.MUST_NOT_BLOCK) als Hauptseite nie geblockt werden. Regeln über Safaris Limit verworfen: bei
+   ads/privacy ein Fehler. Jede Liste muss außerdem die Prüfung der App bestehen (still-check appcheck).
 4. Gegen die zuletzt veröffentlichte Fassung vergleichen: Regelzahl darf nicht um > 20 % einbrechen.
 5. Domainliste für den Schutz in allen Apps ableiten (domains.py) und prüfen: bekannte Werbeserver drin,
    wichtige Dienste (Apple, Google, Microsoft, Banken …) nie.
 6. Nur wenn alle harten Prüfungen bestehen: public/v1 mit manifest.json schreiben (Exit 0).
-   Echte Seiten sind weich: Ausfälle landen in warnings.md (wird zum Issue), blockieren aber nicht.
+   Werbe-Reduktion auf echten Seiten ist weich: Ausfälle landen in warnings.md (wird zum Issue), blockieren aber
+   nicht. „Echte Seiten intakt“ (Seite nicht ausgeblendet, sichtbarer Text nicht eingebrochen) ist hart.
 """
 import datetime
 import hashlib
@@ -117,9 +119,13 @@ def convert(name: str, sources: list[str], paths: dict[str, pathlib.Path]) -> di
             "discardedOverLimit": discarded}
 
 
-def verify(label: str, files: list[pathlib.Path], extra: list[str], report: pathlib.Path, soft_names=True,
-           timeout: int = 1800) -> None:
-    """still-check verify; harte Ergebnisse → failures, echte Seiten/YouTube → warnings."""
+# Echte Seiten, mit denen jede Sprachvariante hart auf „Seite intakt“ geprüft wird
+VARIANT_SITES = ["https://www.spiegel.de/", "https://www.theguardian.com/international"]
+
+
+def verify(label: str, files: list[pathlib.Path], extra: list[str], report: pathlib.Path, timeout: int = 1800) -> None:
+    """still-check verify; harte Ergebnisse → failures, Werbe-Reduktion auf echten Seiten/YouTube → warnings.
+    „Echte Seiten intakt“ ist immer hart: Eine Liste, die echte Seiten ausblendet, wird nie veröffentlicht."""
     args = [str(BIN), "verify", "--report", str(report), "--must-load", ",".join(dns.MUST_NOT_BLOCK)] + extra
     try:
         result = subprocess.run(args + [str(f) for f in files], capture_output=True, text=True, timeout=timeout)
@@ -134,9 +140,16 @@ def verify(label: str, files: list[pathlib.Path], extra: list[str], report: path
     for result in json.loads(report_json.read_text()):
         if not result["meaningful"] or result["passed"]:
             continue
-        # Echte Seiten und YouTube sind weich: Sie melden sich als Issue, halten die Listen aber nicht auf
-        soft = soft_names and (result["name"].startswith(("http", "YouTube")) or result["name"] == "Genug aussagekräftige echte Seiten")
+        # Werbe-Reduktion auf echten Seiten und YouTube ist weich: meldet sich als Issue, hält die Listen nicht auf
+        soft = result["name"].startswith(("http", "YouTube")) or result["name"] == "Genug aussagekräftige echte Seiten"
         (warnings if soft else failures).append(f"{label} – {result['name']}: " + "; ".join(result["details"]))
+
+
+def app_check(name: str, path: pathlib.Path, rules: int) -> None:
+    result = subprocess.run([str(BIN), "appcheck", "--expect", str(rules), str(path)], capture_output=True, text=True, timeout=300)
+    (WORK / f"appcheck-{name}.log").write_text(result.stdout + result.stderr)
+    if result.returncode != 0:
+        failures.append(f"{name}: App würde die Liste ablehnen – " + " ".join((result.stdout + result.stderr).split())[:600])
 
 
 def main() -> int:
@@ -174,11 +187,17 @@ def main() -> int:
                ["--video-script", str(ROOT / "video/youtube-main.js")], WORK / "report")
         if (WORK / "report/report.md").exists():
             (OUT / "report.md").write_text((WORK / "report/report.md").read_text())
-        # … und jede Sprachvariante hart mit der Testseite, so wie Safari sie zusammen mit privacy.json lädt
+        # … und jede Sprachvariante hart mit der Testseite und zwei echten Seiten („intakt“), so wie Safari sie
+        # zusammen mit privacy.json lädt
         for name, info in sorted(variants.items()):
             if info:
-                verify(f"{name}+privacy", [OUT / f"{name}.json", OUT / "privacy.json"], ["--no-sites"],
-                       WORK / f"report-{name}", soft_names=False, timeout=900)
+                verify(f"{name}+privacy", [OUT / f"{name}.json", OUT / "privacy.json"], ["--site-urls", ",".join(VARIANT_SITES)],
+                       WORK / f"report-{name}", timeout=900)
+
+    # Genau die Prüfung der App (RuleListCheck): Lehnt die App eine Liste ab, käme sie bei keinem Nutzer an
+    for name, info in {**outputs, **variants}.items():
+        if info:
+            app_check(name, OUT / info["file"], info["rules"])
 
     # Vergleich mit der veröffentlichten Fassung
     try:

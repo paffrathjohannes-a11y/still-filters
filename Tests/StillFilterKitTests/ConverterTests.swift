@@ -52,6 +52,63 @@ final class ParserTests: XCTestCase {
         XCTAssertEqual(RuleParser.parse("#@#body"), .cosmetic(CosmeticRule(isException: true, selector: "body")))
     }
 
+    /// Die App lehnt eine ganze Liste ab, sobald eine Regel – auch nur für einzelne Domains – html/body/:root/* ausblendet
+    /// (EasyList: `aads.com,…##HTML`, EasyList China: `pos.baidu.com##body`). Solche Regeln dürfen nie durchgehen.
+    func testDomainScopedWholePageSelectorsAreRejected() {
+        for line in ["aads.com,yavli.com##HTML", "pos.baidu.com##body", "example.ru##*", "example.fr##html", "a.de##:root",
+                     "a.de##.ad, body", "a.de##body > *", "a.de##HTML  BODY"] {
+            XCTAssertEqual(RuleParser.parse(Substring(line)), .unsupported("page-selector"), line)
+        }
+    }
+
+    func testTooGenericSelectorsAreRejected() {
+        for selector in [":not(.x)", ":is(html)", ":where(body)", "[lang]", "[dir]", "[class]", "[id]", "[style]", "div",
+                         "section", "p", "span", "a > img", "div > *", "div:nth-child(2)", ":has(img)", "section p", "img[alt]",
+                         ".ad, div", ":is(.a, div)"] {
+            XCTAssertEqual(RuleParser.parse(Substring("##" + selector)), .unsupported("generic-selector"), selector)
+        }
+        // Mit unterscheidendem Merkmal bleiben sie erhalten (alles echte Regeln aus EasyList und den Sprachlisten)
+        for selector in ["[data-ad-cls]", "[data-freestar-ad][id]", "amp-ad", "adsenseintermedioleft", "div[data-ad]",
+                         "a[href^=\"https://halocell.com/go/\"] > img", "#\\5f CookieText", ".ad:not(.x)", ":is(.a, .b)",
+                         "img[width=\"728\"]", "#asdw2 + img", "div[class] > .ad"] {
+            XCTAssertEqual(RuleParser.parse(Substring("##" + selector)), .cosmetic(CosmeticRule(selector: selector)), selector)
+        }
+        // Für einzelne Seiten erlaubt
+        XCTAssertEqual(RuleParser.parse("example.com##div > p"),
+                       .cosmetic(CosmeticRule(includeDomains: ["example.com"], selector: "div > p")))
+    }
+
+    func testAppListCheckMirrorsApp() throws {
+        func problems(_ json: String, _ expect: Int? = nil) -> [AppListCheck.Problem] {
+            AppListCheck.problems(Data(json.utf8), expectedRules: expect)
+        }
+        let scopedHTML = #"[{"trigger":{"url-filter":".*","if-domain":["*aads.com"]},"action":{"type":"css-display-none","selector":"HTML"}}]"#
+        XCTAssertFalse(problems(scopedHTML).isEmpty, "die App lehnt auch domain-beschränkte Seiten-Selektoren ab")
+        let blockAll = #"[{"trigger":{"url-filter":"^https?://"},"action":{"type":"block"}}]"#
+        XCTAssertFalse(problems(blockAll).isEmpty)
+        let scopedBlock = #"[{"trigger":{"url-filter":".*","if-domain":["*x.de"]},"action":{"type":"block"}}]"#
+        XCTAssertTrue(problems(scopedBlock).isEmpty)
+        let fine = #"[{"trigger":{"url-filter":".*"},"action":{"type":"css-display-none","selector":".ad, #banner"}}]"#
+        XCTAssertTrue(problems(fine, 1).isEmpty)
+        XCTAssertFalse(problems(fine, 2).isEmpty, "Regelzahl muss zum Manifest passen")
+        XCTAssertFalse(problems("{}").isEmpty)
+    }
+
+    /// Was der Konverter ausgibt, muss die App immer annehmen – auch wenn die Quellen Seiten-Selektoren enthalten.
+    func testConverterOutputPassesAppCheck() throws {
+        let result = SafariConverter.convert(lines: """
+        ##.ad
+        aads.com,yavli.com##HTML
+        pos.baidu.com##body
+        example.ru##*
+        example.com##.teaser, body
+        ##div
+        ||ads.example^
+        """.split(whereSeparator: \.isNewline))
+        let data = try JSONEncoder().encode(result.rules)
+        XCTAssertEqual(AppListCheck.problems(data, expectedRules: result.rules.count), [])
+    }
+
     func testUnsupportedIsReportedNotDropped() {
         XCTAssertEqual(RuleParser.parse("youtube.com##+js(json-prune, playerResponse.adPlacements)"), .unsupported("scriptlet"))
         XCTAssertEqual(RuleParser.parse("example.com##div:has-text(Anzeige)"), .unsupported("procedural-selector"))

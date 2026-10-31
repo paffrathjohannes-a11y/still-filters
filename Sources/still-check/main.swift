@@ -10,11 +10,16 @@ import WebKit
 //   still-check verify [--report <Ordner>] [--no-sites] [--must-load host,host,…] <blocker.json> …
 //       Testseite + echte Seiten mit und ohne Blocker. Exit-Code 1, wenn eine aussagekräftige Prüfung scheitert.
 //       --must-load: diese Hosts dürfen als Hauptseite nicht geblockt werden (harte Prüfung).
+//       --site-urls: nur diese echten Seiten prüfen (Standard: RealSites.urls).
+//
+//   still-check appcheck [--expect N] <blocker.json>
+//       Genau die Prüfung, mit der die App eine Server-Liste annimmt oder ablehnt (AppListCheck). Exit-Code 1 = App lehnt ab.
 
 let usage = """
 Aufruf:
   still-check convert --out <datei.json> [--max N] <liste|url> ...
-  still-check verify [--report <ordner>] [--no-sites] [--video-script <youtube-main.js>] [--must-load host,host] <blocker.json> ...
+  still-check verify [--report <ordner>] [--no-sites] [--site-urls url,url] [--video-script <youtube-main.js>] [--must-load host,host] <blocker.json> ...
+  still-check appcheck [--expect N] <blocker.json>
 """
 
 @MainActor
@@ -44,8 +49,20 @@ enum CLI {
             let sites = !flag("--no-sites")
             let videoScript = option("--video-script").flatMap { try? String(contentsOfFile: $0, encoding: .utf8) }
             let mustLoad = option("--must-load").map { $0.split(separator: ",").map(String.init) } ?? []
+            let siteURLs = option("--site-urls").map { $0.split(separator: ",").map(String.init) } ?? RealSites.urls
             return await verify(files: rest.map { URL(fileURLWithPath: $0) }, report: report, sites: sites,
-                                videoScript: videoScript, mustLoad: mustLoad)
+                                videoScript: videoScript, mustLoad: mustLoad, siteURLs: siteURLs)
+        case "appcheck":
+            let expect = option("--expect").flatMap(Int.init)
+            guard rest.count == 1, let data = FileManager.default.contents(atPath: rest[0]) else { print(usage); return 2 }
+            let problems = AppListCheck.problems(data, expectedRules: expect)
+            if problems.isEmpty {
+                print("App-Prüfung bestanden: \(rest[0])")
+                return 0
+            }
+            print("App würde \(rest[0]) ablehnen (\(problems.count) Gründe):")
+            for problem in problems.prefix(20) { print("  \(problem)") }
+            return 1
         default:
             print(usage)
             return 2
@@ -101,7 +118,8 @@ enum CLI {
         return 0
     }
 
-    static func verify(files: [URL], report: URL?, sites: Bool, videoScript: String?, mustLoad: [String] = []) async -> Int32 {
+    static func verify(files: [URL], report: URL?, sites: Bool, videoScript: String?, mustLoad: [String] = [],
+                       siteURLs: [String] = RealSites.urls) async -> Int32 {
         let runner = WebKitRunner()
         var lists: [WKContentRuleList] = []
         var header: [String] = []
@@ -125,7 +143,7 @@ enum CLI {
         let verifier = Verifier(runner: runner, lists: lists)
         results += await verifier.testPage()
         if !mustLoad.isEmpty { results += await verifier.mainFrames(mustLoad) }
-        if sites { results += await verifier.realSites() }
+        if sites { results += await verifier.realSites(siteURLs) }
         if let videoScript { results += await VideoCheck(runner: runner, script: videoScript).run() }
 
         let failed = results.filter { $0.meaningful && !$0.passed }

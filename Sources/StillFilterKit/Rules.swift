@@ -115,9 +115,15 @@ public enum RuleParser {
             guard let valid = DomainCheck.normalize(domain) else { return .unsupported("domain-format") }
             if negated { rule.excludeDomains.append(valid) } else { rule.includeDomains.append(valid) }
         }
-        // Allgemeine Regeln, die die ganze Seite oder ihren Hauptinhalt treffen, würden überall alles ausblenden
-        if !rule.isException, rule.includeDomains.isEmpty, SelectorCheck.targetsPage(selector) {
-            return .unsupported("page-selector")
+        if !rule.isException {
+            // Die App lehnt eine ganze Liste ab, sobald irgendeine Ausblende-Regel – auch nur für einzelne Domains –
+            // html, body, :root oder * ausblendet (AppListCheck). Solche Regeln dürfen nie in eine Liste gelangen.
+            if AppListCheck.hidesWholePage(selector) { return .unsupported("page-selector") }
+            // Allgemeine Regeln, die die ganze Seite oder ihren Hauptinhalt treffen, würden überall alles ausblenden
+            if rule.includeDomains.isEmpty {
+                if SelectorCheck.targetsPage(selector) { return .unsupported("page-selector") }
+                if SelectorCheck.isTooGeneric(selector) { return .unsupported("generic-selector") }
+            }
         }
         return .cosmetic(rule)
     }
@@ -280,26 +286,105 @@ enum SelectorCheck {
     }
 
     /// Teilt an Kommas außerhalb von Klammern und Anführungszeichen
-    static func splitTopLevel(_ selector: String) -> [Substring] {
+    static func splitTopLevel(_ selector: Substring, separators: Set<Character> = [","]) -> [Substring] {
         var parts: [Substring] = []
         var depth = 0
         var quote: Character?
+        var escaped = false
         var start = selector.startIndex
         for index in selector.indices {
             let char = selector[index]
+            if escaped { escaped = false; continue }
+            if char == "\\" { escaped = true; continue }
             if let open = quote { if char == open { quote = nil }; continue }
             switch char {
             case "\"", "'": quote = char
             case "(", "[": depth += 1
             case ")", "]": depth -= 1
-            case "," where depth == 0:
-                parts.append(selector[start..<index])
-                start = selector.index(after: index)
-            default: break
+            default:
+                if depth == 0, separators.contains(char) {
+                    parts.append(selector[start..<index])
+                    start = selector.index(after: index)
+                }
             }
         }
         parts.append(selector[start...])
         return parts
+    }
+
+    static func splitTopLevel(_ selector: String) -> [Substring] { splitTopLevel(Substring(selector)) }
+
+    /// Standard-Elemente, die auf praktisch jeder Seite vorkommen. Ein allgemeiner Selektor, der nur aus ihnen
+    /// besteht (`div`, `a > img`, `section p`), blendet überall Inhalt aus.
+    static let commonTags: Set<String> = [
+        "a", "abbr", "address", "area", "article", "aside", "audio", "b", "bdi", "bdo", "blockquote", "body", "br",
+        "button", "canvas", "caption", "center", "cite", "code", "col", "colgroup", "data", "datalist", "dd", "del",
+        "details", "dfn", "dialog", "div", "dl", "dt", "em", "embed", "fieldset", "figcaption", "figure", "font",
+        "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hgroup", "hr", "html", "i", "iframe",
+        "img", "input", "ins", "kbd", "label", "legend", "li", "link", "main", "map", "mark", "marquee", "menu", "meta",
+        "meter", "nav", "noindex", "noscript", "object", "ol", "optgroup", "option", "output", "p", "picture", "pre",
+        "progress", "q", "rp", "rt", "ruby", "s", "samp", "script", "search", "section", "select", "slot", "small",
+        "source", "span", "strong", "style", "sub", "summary", "sup", "svg", "table", "tbody", "td", "template",
+        "textarea", "tfoot", "th", "thead", "time", "title", "tr", "track", "u", "ul", "var", "video", "wbr",
+    ]
+    /// Attribute, die (ohne Wert) auf fast jedem Element bzw. auf <html> selbst stehen: `[lang]`, `[class]` …
+    static let commonAttributes: Set<String> = [
+        "lang", "dir", "class", "id", "style", "title", "hidden", "role", "href", "src", "alt", "name", "type",
+        "width", "height", "tabindex", "target", "rel", "data",
+    ]
+
+    /// true, wenn ein kommagetrennter Teilselektor kein einziges unterscheidendes Merkmal hat: keine Klasse, keine ID,
+    /// kein Attribut mit Wert oder eigenem Namen, kein unbekanntes Element. Beispiele: `div`, `a > img`, `[lang]`,
+    /// `:not(.x)`, `:is(html)`, `:where(body)`, `div:nth-child(2)`. Inhalt von `:not()`/`:has()` zählt nicht als
+    /// Merkmal, Inhalt von `:is()`/`:where()` nur, wenn jeder Zweig selbst eins hat.
+    static func isTooGeneric(_ selector: String) -> Bool {
+        splitTopLevel(selector).contains { !hasDistinctiveCompound($0) }
+    }
+
+    private static func hasDistinctiveCompound(_ part: Substring) -> Bool {
+        splitTopLevel(part, separators: [" ", ">", "+", "~", "\t"]).contains { compound in
+            let compound = compound.trimmingCharacters(in: .whitespaces)
+            return !compound.isEmpty && isDistinctive(Substring(compound))
+        }
+    }
+
+    private static func isDistinctive(_ compound: Substring) -> Bool {
+        var depth = 0
+        var quote: Character?
+        var escaped = false
+        var groupStart = compound.startIndex
+        var topLevel = ""
+        for index in compound.indices {
+            let char = compound[index]
+            if escaped { escaped = false; if depth == 0 { topLevel.append("x") }; continue }
+            if char == "\\" { escaped = true; continue }
+            if let open = quote { if char == open { quote = nil }; continue }
+            switch char {
+            case "\"", "'": quote = char
+            case "(", "[":
+                if depth == 0 { groupStart = index }
+                depth += 1
+            case ")", "]":
+                depth -= 1
+                guard depth == 0 else { continue }
+                let inner = compound[compound.index(after: groupStart)..<index]
+                if char == "]" {
+                    if inner.contains("=") { return true }
+                    let name = inner.trimmingCharacters(in: .whitespaces).lowercased()
+                    if !commonAttributes.contains(name) { return true }
+                } else {
+                    let before = compound[..<groupStart].lowercased()
+                    let grouping = [":is", ":where", ":matches", ":-webkit-any"].contains { before.hasSuffix($0) }
+                    if grouping, splitTopLevel(inner).allSatisfy(hasDistinctiveCompound) { return true }
+                }
+            default:
+                if depth == 0 { topLevel.append(char) }
+            }
+        }
+        if topLevel.contains(".") || topLevel.contains("#") { return true }
+        let tag = topLevel.prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }.lowercased()
+        if let first = tag.first, first.isLetter, !commonTags.contains(tag) { return true }
+        return false
     }
 
     /// Grobe Plausibilitätsprüfung. Ein einziger ungültiger Selektor lässt WebKit die ganze Liste ablehnen;
