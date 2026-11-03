@@ -1,0 +1,54 @@
+[Adblock Plus 2.0]
+! Title: Still – Tracker- und Telemetrie-Ergänzungen
+! Eigene Liste für Still, gemeinfrei (CC0). Gepflegt in github.com/paffrathjohannes-a11y/still-filters.
+! Werbe-, Analyse- und Telemetrie-Server, die die freien Listen (EasyList/EasyPrivacy) nicht oder nur über
+! Pfade sperren. Jeder Eintrag sperrt genau diesen Host und seine Subdomains, nie eine ganze Plattform.
+!
+! Werbung
+||afs.googlesyndication.com^
+||m.doubleclick.net^
+||mediavisor.doubleclick.net^
+||adtago.s3.amazonaws.com^
+||analyticsengine.s3.amazonaws.com^
+||analytics.s3.amazonaws.com^
+||unityads.unity3d.com^
+||offerwall.yandex.net^
+||partnerads.ysm.yahoo.com^
+||gemini.yahoo.com^
+||adtech.yahooinc.com^
+!
+! Analyse und Reichweitenmessung
+||googleanalytics.com^
+||udc.yahoo.com^
+||udcm.yahoo.com^
+||analytics.query.yahoo.com^
+||log.fc.yahoo.com^
+||appmetrica.yandex.ru^
+||adfstat.yandex.ru^
+||metrika.yandex.ru^
+!
+! Soziale Netzwerke: nur Werbe- und Mess-Schnittstellen
+||an.facebook.com^
+||ads-api.twitter.com^
+||ads-api.tiktok.com^
+||ads-sg.tiktok.com^
+||business-api.tiktok.com^
+||log.byteoversea.com^
+!
+! Hersteller-Telemetrie (wird von Webseiten nie gebraucht)
+||iot-eu-logser.realme.com^
+||iot-logser.realme.com^
+||bdapi-ads.realmemobile.com^
+||bdapi-in-ads.realmemobile.com^
+||data.mistat.xiaomi.com^
+||data.mistat.india.xiaomi.com^
+||data.mistat.rus.xiaomi.com^
+||tracking.rus.miui.com^
+||adsfs.oppomobile.com^
+||ads.oppomobile.com^
+||grs.hicloud.com^
+||iadsdk.apple.com^
+||api-adservices.apple.com^
+||books-analytics-events.apple.com^
+||weather-analytics-events.apple.com^
+||notes-analytics-events.apple.com^

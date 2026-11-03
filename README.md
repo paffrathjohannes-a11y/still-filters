@@ -23,7 +23,8 @@ The published lists are adaptations of the sources below and are distributed und
 
 EasyList, EasyPrivacy and the EasyList language lists (CC BY-SA 3.0), Fanboy's lists (CC BY 3.0),
 Liste FR and Liste AR (CC BY-SA 3.0), RU AdList (CC BY 3.0), EasyList Czech and Slovak (CC BY-SA 4.0),
-malware-filter by curbengh (CC0), NoCoin (MIT). Full list with links: `v1/manifest.json` → `attribution`.
+malware-filter by curbengh (CC0), NoCoin (MIT), plus Still's own tracker additions in
+[`still-trackers.txt`](still-trackers.txt) (CC0). Full list with links: `v1/manifest.json` → `attribution`.
 
 ## Code
 

@@ -46,6 +46,14 @@ warnings: list[str] = []
 def fetch(source_id: str) -> pathlib.Path:
     source = CONFIG["sources"][source_id]
     path = WORK / f"{source_id}.txt"
+    # Eigene Listen liegen im Repo; für sie gelten Kopf- und Lizenzprüfung, aber keine Mindestgröße
+    if "file" in source:
+        data = (ROOT / source["file"]).read_bytes()
+        path.write_bytes(data)
+        head = data[:6000].decode("utf-8", errors="replace")
+        if not looks_like_filter_list(head) or source["licenceMarker"] not in head:
+            failures.append(f"{source['name']}: Kopf oder Lizenzangabe fehlt")
+        return path
     request = urllib.request.Request(source["url"], headers={"User-Agent": "still-filters (+https://github.com/paffrathjohannes-a11y/still-filters)"})
     with urllib.request.urlopen(request, timeout=60) as response:
         data = response.read()
