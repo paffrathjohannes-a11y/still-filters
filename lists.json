@@ -20,7 +20,7 @@
     "lang-he": { "name": "EasyList Hebrew", "url": "https://raw.githubusercontent.com/easylist/EasyListHebrew/master/EasyListHebrew.txt", "licence": "CC BY-SA 3.0", "licenceMarker": "easylist.to/pages/licence" },
     "lang-cs": { "name": "EasyList Czech and Slovak", "url": "https://raw.githubusercontent.com/tomasko126/easylistczechandslovak/master/filters.txt", "licence": "CC BY-SA 4.0", "licenceMarker": "CC-BY-SA" },
     "lang-ar": { "name": "Liste AR", "url": "https://easylist-downloads.adblockplus.org/Liste_AR.txt", "licence": "CC BY-SA 3.0", "licenceMarker": "licenses/by-sa/3.0" },
-    "still-trackers": { "name": "Still Tracker-Ergänzungen", "file": "still-trackers.txt", "licence": "CC0 (eigene Liste)", "licenceMarker": "CC0" }
+    "still-trackers": { "name": "Still Tracker-Ergänzungen", "file": "still-trackers.txt", "url": "https://github.com/paffrathjohannes-a11y/still-filters/blob/main/still-trackers.txt", "licence": "CC0 (eigene Liste)", "licenceMarker": "CC0" }
   },
   "blockers": {
     "privacy": ["easyprivacy", "fanboy-cookie", "fanboy-annoyance", "phishing", "still-trackers"],
