@@ -25,6 +25,8 @@ jobs:
     permissions:
       contents: read
       issues: write
+    outputs:
+      generated: ${{ steps.stand.outputs.generated }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -35,6 +37,12 @@ jobs:
           swift test
       - name: Listen bauen und prüfen
         run: python3 build.py
+      - name: Gebauten Stand merken
+        id: stand
+        run: |
+          generated=$(python3 -c "import json;print(json.load(open('public/v1/manifest.json'))['generated'])")
+          test -n "$generated"
+          echo "generated=$generated" >> "$GITHUB_OUTPUT"
       - name: Prüfbericht sichern
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -69,9 +77,35 @@ jobs:
     permissions:
       pages: write
       id-token: write
+      issues: write
     environment:
       name: github-pages
       url: ${{ steps.pages.outputs.page_url }}
     steps:
       - id: pages
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+      # Die Auslieferung kann "success" melden, ohne dass der neue Stand online ist (10.11.2026: Lauf grün,
+      # online blieb die Fassung vom Vortag). Deshalb zählt nur, was die Adresse der App wirklich liefert.
+      - name: Prüfen, dass der gebaute Stand online ist
+        env:
+          ERWARTET: ${{ needs.build.outputs.generated }}
+          URL: https://paffrathjohannes-a11y.github.io/still-filters/v1/manifest.json
+        run: |
+          test -n "$ERWARTET" || { echo "Kein gebauter Stand übergeben"; exit 1; }
+          for versuch in $(seq 1 30); do
+            online=$(curl -fsS -m 20 "$URL?pruefung=$GITHUB_RUN_ID-$versuch" | python3 -c "import json,sys;print(json.load(sys.stdin)['generated'])" || true)
+            echo "Versuch $versuch: online=$online erwartet=$ERWARTET"
+            [ "$online" = "$ERWARTET" ] && exit 0
+            sleep 30
+          done
+          echo "Der gebaute Stand ist nach 15 Minuten nicht online."
+          exit 1
+      - name: Nicht ausgelieferten Stand als Issue melden
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh label create fehler --color D73A4A --force >/dev/null
+          gh issue create --label fehler --title "Listen gebaut, aber nicht online $(date +%F)" \
+            --body "Die Auslieferung meldete Erfolg, die Adresse der App liefert aber nicht den gebauten Stand. Lauf: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
